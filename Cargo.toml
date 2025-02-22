@@ -1,0 +1,9 @@
+[package]
+name = "old-files"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.95"
+chrono = "0.4.39"
+clap = { version = "4.5.26", features = ["derive"] }
