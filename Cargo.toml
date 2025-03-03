@@ -7,3 +7,9 @@ edition = "2021"
 anyhow = "1.0.95"
 chrono = "0.4.39"
 clap = { version = "4.5.26", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3.8"
+rand = "0.8"
+fake = { version = "2.5", features = ["derive"] }
+proptest = "1.2"
