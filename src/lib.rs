@@ -1,23 +1,47 @@
 use chrono::prelude::*;
-use std::io;
-use std::{fs, time::SystemTime};
+use std::{fs, path::PathBuf, time::SystemTime};
 
-pub fn get_access_time(path: &std::path::Path) -> anyhow::Result<u64> {
-    let metadata = fs::metadata(path)?;
-    if let Ok(atime) = metadata.accessed() {
-        Ok(atime
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("Invalid access time")
-            .as_secs())
-    } else {
-        Err(anyhow::anyhow!("Could not get access time for file",))
+#[derive(Debug, Clone)]
+pub struct FileEntry {
+    pub file_entry: PathBuf,
+    pub access_time: u64,
+}
+
+impl std::cmp::Ord for FileEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.access_time.cmp(&other.access_time)
     }
+}
+
+impl std::cmp::PartialOrd for FileEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.access_time.cmp(&other.access_time))
+    }
+}
+
+impl std::cmp::PartialEq for FileEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.access_time == other.access_time
+    }
+}
+
+impl std::cmp::Eq for FileEntry {}
+
+pub fn get_access_time(path: &std::path::Path) -> std::io::Result<u64> {
+    let metadata = fs::metadata(path)?;
+
+    let atime = metadata.accessed()?;
+
+    Ok(atime
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("Invalid access time")
+        .as_secs())
 }
 
 pub fn get_directory_entries(
     directory: &std::path::Path,
     recursive: bool,
-) -> io::Result<Vec<std::path::PathBuf>> {
+) -> std::io::Result<Vec<FileEntry>> {
     let mut entries = Vec::new();
 
     for entry in fs::read_dir(directory)? {
@@ -29,21 +53,26 @@ pub fn get_directory_entries(
                 continue;
             }
         }
-        entries.push(entry.path());
+        if entry.file_type()?.is_file() {
+            entries.push(FileEntry {
+                file_entry: entry.path(),
+                access_time: get_access_time(&entry.path())?,
+            });
+        }
     }
 
     Ok(entries)
 }
 
 pub fn get_access_times(directory: &std::path::Path, recursive: bool) -> anyhow::Result<()> {
-    let entries = get_directory_entries(directory, recursive)?;
-    for entry in entries {
-        if entry.is_file() {
-            let accessed_time: DateTime<Utc> =
-                DateTime::from_timestamp(get_access_time(&entry)? as i64, 0).unwrap();
-            println!("{} - {:?}", entry.display(), accessed_time);
-        }
+    let mut entries = get_directory_entries(directory, recursive)?;
+    entries.sort();
+    for entry in &entries {
+        let accessed_time: DateTime<Utc> =
+            DateTime::from_timestamp(entry.access_time as i64, 0).unwrap();
+        println!("{} - {:?}", entry.file_entry.display(), accessed_time);
     }
+    println!("\nFound {} files.", entries.len());
 
     Ok(())
 }
@@ -211,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_directory_entries_non_recursive() -> io::Result<()> {
+    fn test_get_directory_entries_non_recursive() -> anyhow::Result<()> {
         let (temp_dir, _) = create_test_directory()?;
         let _ = get_directory_entries(temp_dir.path(), false)?;
 
@@ -226,7 +255,7 @@ mod tests {
             .collect();
 
         let entries = get_directory_entries(temp_dir.path(), false)?;
-        let entries_set: HashSet<PathBuf> = entries.into_iter().collect();
+        let entries_set: HashSet<PathBuf> = entries.into_iter().map(|x| x.file_entry).collect();
 
         // Check that the files are the same
         assert_eq!(
@@ -238,11 +267,11 @@ mod tests {
     }
 
     #[test]
-    fn test_get_directory_entries_recursive() -> io::Result<()> {
+    fn test_get_directory_entries_recursive() -> anyhow::Result<()> {
         let (temp_dir, all_files) = create_test_directory()?;
 
         let entries = get_directory_entries(temp_dir.path(), true)?;
-        let entries_set: HashSet<PathBuf> = entries.into_iter().collect();
+        let entries_set: HashSet<PathBuf> = entries.into_iter().map(|x| x.file_entry).collect();
 
         /* FIXME: The assertion below fails
         *
@@ -276,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_directory_entries_empty() -> io::Result<()> {
+    fn test_get_directory_entries_empty() -> anyhow::Result<()> {
         let temp_dir = TempDir::new()?;
 
         let entries_recursive = get_directory_entries(temp_dir.path(), true)?;
@@ -289,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_directory_entries_unusual_filenames() -> io::Result<()> {
+    fn test_get_directory_entries_unusual_filenames() -> anyhow::Result<()> {
         let temp_dir = TempDir::new()?;
         let mut unusual_files = HashSet::new();
 
@@ -327,7 +356,7 @@ mod tests {
         // Test time
         //
         let entries = get_directory_entries(temp_dir.path(), true)?;
-        let entries_set: HashSet<PathBuf> = entries.into_iter().collect();
+        let entries_set: HashSet<PathBuf> = entries.into_iter().map(|x| x.file_entry).collect();
 
         /* FIXME: Below test assertion fails
         * assert_eq!(
