@@ -1,5 +1,5 @@
 use chrono::prelude::*;
-use std::{fs, path::PathBuf, time::SystemTime};
+use std::{collections::HashMap, fs, path::PathBuf, time::SystemTime};
 
 #[derive(Debug, Clone)]
 pub struct FileEntry {
@@ -65,13 +65,71 @@ pub fn get_directory_entries(
 }
 
 pub fn get_access_times(directory: &std::path::Path, recursive: bool) -> anyhow::Result<()> {
-    let mut entries = get_directory_entries(directory, recursive)?;
-    entries.sort();
+    let entries = get_directory_entries(directory, recursive)?;
+
+    let mut output: HashMap<String, HashMap<u64, Vec<String>>> = HashMap::new();
+
     for entry in &entries {
-        let accessed_time: DateTime<Utc> =
-            DateTime::from_timestamp(entry.access_time as i64, 0).unwrap();
-        println!("{} - {:?}", entry.file_entry.display(), accessed_time);
+        let parent_path = format!("{}", entry.file_entry.parent().unwrap().display());
+        let file_name = format!(
+            "{}",
+            entry.file_entry.file_name().unwrap().to_string_lossy()
+        );
+
+        if !output.contains_key(&parent_path) {
+            let mut data: Vec<String> = Vec::new();
+            data.push(file_name);
+            output.insert(parent_path.clone(), HashMap::new());
+            output
+                .get_mut(&parent_path)
+                .unwrap()
+                .insert(entry.access_time, data);
+        } else {
+            let mut data: Vec<String> = Vec::new();
+            data.push(file_name);
+            if !output
+                .get(&parent_path)
+                .unwrap()
+                .contains_key(&entry.access_time)
+            {
+                output
+                    .get_mut(&parent_path)
+                    .unwrap()
+                    .insert(entry.access_time, data);
+            } else {
+                output
+                    .get_mut(&parent_path)
+                    .unwrap()
+                    .get_mut(&entry.access_time)
+                    .unwrap()
+                    .extend(data);
+            }
+        }
     }
+
+    let mut parent_paths = output.keys().collect::<Vec<&String>>();
+    parent_paths.sort();
+    for parent_path in parent_paths {
+        println!("\n{}", parent_path);
+
+        let mut access_times = output
+            .get(parent_path)
+            .unwrap()
+            .keys()
+            .collect::<Vec<&u64>>();
+        access_times.sort();
+
+        for access_time in access_times {
+            let accessed_time: DateTime<Utc> =
+                DateTime::from_timestamp(*access_time as i64, 0).unwrap();
+
+            let file_names = output.get(parent_path).unwrap().get(access_time).unwrap();
+            for file_name in file_names {
+                println!("\t{} - {}", file_name, accessed_time);
+            }
+        }
+    }
+
     println!("\nFound {} files.", entries.len());
 
     Ok(())
